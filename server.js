@@ -2,7 +2,8 @@ var util = require('util'),
     http = require('http'),
     url  = require('url'),
     fs   = require('fs'),
-    path = require('path');
+    path = require('path'),
+    mime = require('./lib/mime.js');
 //Config-------------------------
 var config = {};
     config.port = 9527;
@@ -69,46 +70,6 @@ var fileObject = function(filePath, fileName){
     var result = isFind ? findFile : false;
     return result;
   }
-
-  //判斷contentType 和charset, 未來考慮抽出來
-  this.getContentData = function(file, type){
-    var fileType = path.basename(file).split('.').pop();
-    var contentType, charSet = null;
-    switch (fileType){
-      case 'html':
-      case 'htm':
-        contentType = 'text/html';
-        charSet = 'utf-8';
-        break;
-      case 'js':
-        contentType = 'application/x-javascript';
-        charSet = 'utf-8';
-        break;
-      case 'css':
-        contentType = 'text/css';
-        charSet = 'utf-8';
-        break;
-      case 'jpg':
-      case 'jpeg':
-        contentType = 'image/jpeg';
-        break;
-      case 'png':
-        contentType = 'image/png';
-        break;
-      case 'ico':
-        contentType = 'image/x-icon';
-        break;
-      default:
-        contentType = 'text/plain';
-        charSet = 'utf-8';
-        break;
-    }
-    if (type == 'contentType'){
-      return contentType;
-    }else{
-      return charSet;
-    }
-  }
   
   this.filePath = filePath;
   this.originfileName = fileName;
@@ -124,8 +85,10 @@ var fileObject = function(filePath, fileName){
 
   this.indexFind = !this.isExists && this.fileName != '';
   this.fullFilePath = this.fileName ? this.filePath + this.fileName : this.filePath + this.originfileName;
-  this.contentType = this.getContentData(this.fullFilePath, 'contentType'); 
-  this.charSet = this.getContentData(this.fullFilePath, 'charSet'); 
+  this.fileExt = this.fileName.split('.').pop();
+  this.mime = new mime(this.fileExt)
+  this.contentType = this.mime.contentType;
+  this.charSet = this.mime.charset;
   this.mtime = fs.statSync(this.fullFilePath).mtime;
   this.size = fs.statSync(this.fullFilePath).size;
 }
