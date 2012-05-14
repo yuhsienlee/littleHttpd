@@ -20,27 +20,28 @@ var sendFile = function(res, stCode, fileObj){
   if (stCode == 404){
     file = config.noPage;
   }
-  var contentType = fileObj.contentType;
-  var charSet = fileObj.charSet;
-  var contentLength = fileObj.size;
-  var content = fs.readFileSync(file, charSet);
-  var lastModify = fileObj.mtime;
+  var contentType = !fileObj.charSet ? fileObj.contentType : fileObj.contentType + ';charset=' + fileObj.charSet;
+  var resHeader;
   switch (stCode){
     case 404:
     case 200:
-      res.setHeader('Cache-control',  'max-age=3600');
-      res.setHeader('Content-Type', contentType);
-      if (charSet != ''){
-        res.setHeader('charset=', charSet);
-      }
-      res.setHeader('Content-Length', contentLength);
-      res.setHeader('Connection', 'keep-alive');
-      res.setHeader('Date', new Date().toString());
-      res.setHeader('Last-Modified', lastModify);
+      var content = fs.readFileSync(file, fileObj.charSet);
+      resHeader = {
+        'Cache-control': 'max-age=3600',
+        'Content-Type': contentType,
+        'Content-Length': fileObj.size,
+        'Date': new Date().toString(),
+        'Last-Modified': fileObj.mtime
+      };
+      res.writeHead(stCode, resHeader);
       res.write(content);
       break;
     case 304:
-      res.setHeader('Last-Modified', lastModify);
+      resHeader = {
+        'Date': new Date().toString(),
+        'Last-Modified': fileObj.mtime
+      };
+      res.writeHead(stCode, resHeader);
       break;
   }
   res.end();
