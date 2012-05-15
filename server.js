@@ -3,130 +3,147 @@ var util = require('util'),
     url  = require('url'),
     fs   = require('fs'),
     path = require('path'),
-    mime = require('./lib/mime.js');
+    mime = require('./lib/mime.js'),
+    events = require('events').EventEmitter;
 //Config-------------------------
-var config = {};
-    config.port = 9527;
-    config.ip = '127.0.0.1';
-    config.documentPath = '/Users/unifish/node/www/';
-    config.noPage = '404.html';
-    config.indexPage = ['index.html', 'index.htm', 'index.shtml'];
+  var config = {};
+  config.port = 9527;
+  config.ip = '127.0.0.1';
+  config.documentPath = '/Users/unifish/src/nodeHttpd/www/';
+  config.noPage = '404.html';
+  config.indexPage = ['index.html', 'index.htm', 'index.shtml'];
+  config.msg = [];
+  config.msg[404] = 'NOT FOUND';
+  config.msg[500] = 'Internal Server Error';
+  config.msg[304] = 'NOT MOD';
 //------------------------------
 
-//吐資料給Client
-var sendFile = function(res, stCode, fileObj){
-  res.statusCode = stCode;
-  var file = fileObj.fullFilePath;
-  var contentType = !fileObj.charSet ? fileObj.contentType : fileObj.contentType + ';charset=' + fileObj.charSet;
-  fs.readFile(file, fileObj.charSet, function(err, content){
-    var resHeader;
+var requestHandler = function(req, res){
+  var connect = new events;
+      connect.req = req;
+      connect.res = res;
+  //debug用XD
+  connect.on('log', function(){
+    console.log(this);
+  });
+  //send header
+  connect.on('sendHeader', function(stCode){
+    this.stCode = stCode;
+    var resHeader = {};
     switch (stCode){
-      case 404:
-      case 200:
-        resHeader = {
-          'Cache-control': 'max-age=3600',
-          'Content-Type': contentType,
-          'Content-Length': fileObj.size,
-          'Date': new Date().toString(),
-          'Last-Modified': fileObj.mtime
-        };
-        res.writeHead(stCode, resHeader);
-        res.write(content);
-        break;
       case 304:
+        console.log(config.msg[stCode] + ': ' + this.fullPath);
         resHeader = {
           'Date': new Date().toString(),
-          'Last-Modified': fileObj.mtime
+          'Last-Modified': this.mtime,
+          'eTag': this.eTag
         };
-        res.writeHead(stCode, resHeader);
+        this.res.writeHead(stCode, resHeader);
         break;
+    }
+    this.res.end();
+  });
+
+  //吐檔案
+  connect.on('sendFile', function(){
+    fs.readFile(this.fullPath, this.mime.charset, function(err, content){
+      if (err){throw err;}
+      connect.stCode = connect.stCode != undefined ? connect.stCode : 200;
+      console.log(config.msg[connect.stCode] + ': ' + connect.fullPath);
+      var resHeader = {
+        'Cache-control': 'max-age=3600',
+        'Content-Type': connect.mime.contentType,
+        'Content-Length': connect.fileSize,
+        'Date': new Date().toString(),
+        'Last-Modified': connect.mtime,
+        'eTag': connect.eTag
+      };
+      connect.res.writeHead(connect.stCode, resHeader);
+      connect.res.write(content);
+      connect.res.end();
+    });
+  });
+  
+  //轉向
+  connect.on('redirect', function(stCode){
+    this.stCode = stCode;
+    switch (this.stCode){
+      case 404:
       case 500:
-        resHeader = {
-          'Content-Type': 'text/plian',
-        } 
-        res.writeHead(stCode, resHeader);
-        res.write('500 - InternalServer Error');
+        console.log(config.msg[this.stCode] + ': ' + this.fullPath + ', redirect..');
+        path.exists(config.documentPath + config.noPage, function(exists){
+          if (!exists){//找無page
+            var msg = '404 - NOT FOUND';
+            connect.res.writeHead(404, {
+              'Content-Type': 'text/plian',
+              'Content-Length': msg.length
+            });
+            connect.res.end(msg);
+            return;
+          }
+          connect.stCode = 404;
+          connect.emit('findFile', config.documentPath, config.noPage);
+        });
+        break;
+      case 302:
+        break;
+    }
+  });
+  //查查modify
+  connect.on('checkModify', function(){
+    if (this.req.headers['if-modified-since'] != undefined && this.req.headers['if-none-match'] != undefined){
+      var cacheTime = new Date(this.req.headers['if-modified-since']).getTime();
+      var cacheEtag = this.req.headers['if-none-match'];
+      var fileTime = new Date(this.mtime).getTime();
+      var fileEtag = this.eTag;
+      if (cacheTime >= fileTime && fileEtag == cacheEtag){//not modified
+        this.emit('sendHeader', 304); 
+      }else{
+        this.emit('sendFile');
       }
-      res.end();
+   }else{
+     this.emit('sendFile');
+   }
+  });
+  //找檔案
+  connect.on('findFile', function(path, page){
+    this.requestFile = page ? page : this.requestFile;
+    this.requestPath = path ? path : this.requestPath;
+    this.fileExt = this.requestFile.split('.').pop();
+    this.fullPath = this.requestPath + this.requestFile;
+    this.mime = new mime(this.fileExt);
+    fs.stat(this.fullPath, function(err, stat){
+      if (err){
+        connect.emit('redirect', 404);
+        return;
+      }
+      connect.fileSize = stat.size;
+      connect.mtime = stat.mtime;
+      connect.eTag = new Date(stat.mtime).getTime() + stat.size;
+      connect.emit('checkModify');
+    });
+  });
+
+  req.on('end', function(){
+    var urlObj = url.parse(req.url);
+    var pathname = urlObj.pathname.split('/');
+    connect.requestFile = pathname.pop();
+    connect.requestPath = pathname.join('') != '' ? config.documentPath + pathname.join('') + '/' : config.documentPath;
+    if (connect.requestFile == ''){//url為目錄, 找index
+      config.indexPage.forEach(function(page){
+        var file = connect.requestPath + page;
+        path.exists(file, function(exists){
+          if (exists){
+            connect.emit('findFile', connect.requestPath, page);
+          }
+        });
+      });
+    }else{//url為檔案
+      connect.emit('findFile');
+    }
   });
 }
 
-//判斷檔案更動時間
-var checkModify = function(cacheTime, fileTime){
-  var cacheTS = new Date(cacheTime).getTime();
-  var fileTS = new Date(fileTime).getTime();
-  return fileTS <= cacheTS;
-}
-
-//檔案物件
-var fileObject = function(filePath, fileName){
-  this.filePath = filePath;
-  this.fileName = fileName;
-
-  //判斷檔案存不存在
-  this.isExists = function(filePath, fileName){
-    if (!fileName){
-      return false;
-    }
-    var result = path.existsSync(filePath + fileName);
-    return result;
-  }(this.filePath, this.fileName);
-
-  this.fullFilePath = this.filePath + this.fileName;
-  this.fileExt = this.isExists ? this.fileName.split('.').pop() : null;
-  this.mime = this.isExists ? new mime(this.fileExt) : null;
-  this.contentType = this.isExists ? this.mime.contentType : null;
-  this.charSet = this.isExists ? this.mime.charset : null;
-  this.mtime = this.isExists ? fs.statSync(this.fullFilePath).mtime : null;
-  this.size = this.isExists ? fs.statSync(this.fullFilePath).size : null;
-}
-
-var requestHandler = function(req, res){
-  var urlObj = url.parse(req.url);
-  var pathname = urlObj.pathname.split('/'); 
-  var requestFile = pathname.pop();
-  var requestPath = pathname.join('') != '' ? config.documentPath + pathname.join('') + '/' : config.documentPath;
-  var redirect = 0;//不需轉向
-  if (requestFile == ''){//為目錄, findIndex
-     redirect = 1;//需轉向
-     for (var i in config.indexPage){
-       if (path.existsSync(requestPath + config.indexPage[i])){
-        requestFile = config.indexPage[i];
-        redirect = 2;//有轉向
-        console.log('redirect to ' + requestFile);
-        break;
-       }
-     }
-  }
-  var fileObj = new fileObject(requestPath, requestFile);
-  var stCode = 200;
-  if (!fileObj.isExists){//檔案不存在 or 轉向找不到index
-    if (redirect == 0){
-      console.log('NOT FOUND');
-    }else if (redirect == 1){
-      console.log('Index NOT FOUND: ' + requestPath);
-    }
-    //轉向404
-    fileObj = new fileObject(config.documentPath, config.noPage);
-    stCode = 404;
-  }else{//檔案存在
-    if (req.headers['if-modified-since'] != undefined){
-      var cacheTime = req.headers['if-modified-since'];
-      var fileTime = fileObj.mtime;
-      if (checkModify(cacheTime, fileTime)){//not modified
-        console.log('NOT MOD: ' + fileObj.fullFilePath);
-        stCode = 304;
-      }else{//200 OK
-        console.log('GET: ' + fileObj.fullFilePath);
-      }
-    }else{//200 OK
-      console.log('GET: ' + fileObj.fullFilePath);
-    }
-  }
-  //輸出
-  //console.log(fileObj);
-  sendFile(res, stCode, fileObj);
-}
 
 http.createServer(requestHandler)
     .listen(config.port, config.ip);
