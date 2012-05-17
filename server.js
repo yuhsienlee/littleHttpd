@@ -1,22 +1,11 @@
-var util = require('util'),
+var config = require('./config'),
+    util = require('util'),
     http = require('http'),
     url  = require('url'),
     fs   = require('fs'),
     path = require('path'),
     mime = require('./lib/mime.js'),
     events = require('events').EventEmitter;
-//Config-------------------------
-  var config = {};
-  config.port = 9527;
-  config.ip = '127.0.0.1';
-  config.documentPath = '/Users/unifish/src/nodeHttpd/www/';
-  config.noPage = '404.html';
-  config.indexPage = ['index.html', 'index.htm', 'index.shtml'];
-  config.msg = [];
-  config.msg[404] = 'NOT FOUND';
-  config.msg[500] = 'Internal Server Error';
-  config.msg[304] = 'NOT MOD';
-//------------------------------
 
 var requestHandler = function(req, res){
   var connect = new events;
