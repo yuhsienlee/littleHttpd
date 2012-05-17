@@ -13,6 +13,7 @@ var removeRelativePath = function(pathname){
   while (true){
     var pathCurrent = pathname.shift();
     switch (pathCurrent){
+      case '':
       case '.':
         break;
       case '..':
@@ -154,8 +155,6 @@ var requestHandler = function(req, res){
           }else{
             notFound++;
             if (notFound == config.indexPage.length){//找不到index
-              connect.stCode = 404;
-              connect.fullPath = connect.requestPath;
               connect.emit('redirect', 404);
             }
           }
