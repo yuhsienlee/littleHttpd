@@ -7,7 +7,8 @@ var config = {
   'documentPath':  __dirname + '/www/',
   'noPage':  '404.html',
   'indexPage':  ['index.html', 'index.htm', 'index.shtml'],
-  'msg':  msg
+  'msg':  msg,
+  'serverData': 'nodeHttpd'
 };
 
 module.exports = config;

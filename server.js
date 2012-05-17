@@ -6,6 +6,30 @@ var config = require('./config'),
     path = require('path'),
     mime = require('./lib/mime.js'),
     events = require('events').EventEmitter;
+//-------------------------------
+//url相對路徑處理
+var removeRelativePath = function(pathname){
+  var pathAssem = [];
+  while (true){
+    var pathCurrent = pathname.shift();
+    switch (pathCurrent){
+      case '.':
+        break;
+      case '..':
+        if (pathAssem.length > 0){
+          pathAssem.shift();
+        }
+        break;
+      default:
+        pathAssem.push(pathCurrent)
+        break;
+    }
+    if (pathname.length == 0){
+      break;
+    }
+  }
+  return pathAssem;
+}
 
 var requestHandler = function(req, res){
   var connect = new events;
@@ -45,7 +69,8 @@ var requestHandler = function(req, res){
         'Content-Length': connect.fileSize,
         'Date': new Date().toString(),
         'Last-Modified': connect.mtime,
-        'eTag': connect.eTag
+        'eTag': connect.eTag,
+        'Server': config.serverData 
       };
       connect.res.writeHead(connect.stCode, resHeader);
       connect.res.write(content);
@@ -117,13 +142,22 @@ var requestHandler = function(req, res){
     var urlObj = url.parse(req.url);
     var pathname = urlObj.pathname.split('/');
     connect.requestFile = pathname.pop();
-    connect.requestPath = pathname.join('') != '' ? config.documentPath + pathname.join('') + '/' : config.documentPath;
+    pathname = removeRelativePath(pathname);//url相對路徑處理
+    connect.requestPath = config.documentPath + pathname.join('/') + '/';
     if (connect.requestFile == ''){//url為目錄, 找index
+      var notFound = 0;
       config.indexPage.forEach(function(page){
         var file = connect.requestPath + page;
         path.exists(file, function(exists){
           if (exists){
             connect.emit('findFile', connect.requestPath, page);
+          }else{
+            notFound++;
+            if (notFound == config.indexPage.length){//找不到index
+              connect.stCode = 404;
+              connect.fullPath = connect.requestPath;
+              connect.emit('redirect', 404);
+            }
           }
         });
       });
